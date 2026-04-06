@@ -114,115 +114,130 @@ def insert_classification(event_id: int, risk_type: str, asset_class: str, sever
 
 def fetch_enriched_events(days: int = 7, limit: int = 500) -> pd.DataFrame:
     """Return events joined with sentiment + classification for the last N days."""
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT
-            e.id,
-            e.title,
-            e.description,
-            e.source,
-            e.url,
-            e.published_at,
-            s.positive,
-            s.negative,
-            s.neutral,
-            s.label      AS sentiment_label,
-            s.confidence AS sentiment_confidence,
-            c.risk_type,
-            c.asset_class,
-            c.severity,
-            c.direction
-        FROM news_events e
-        LEFT JOIN sentiment_scores    s ON s.event_id = e.id
-        LEFT JOIN risk_classifications c ON c.event_id = e.id
-        WHERE e.published_at >= datetime('now', ? )
-        ORDER BY e.published_at DESC
-        LIMIT ?
-        """,
-        conn,
-        params=(f"-{days} days", limit),
-    )
-    conn.close()
-    return df
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query(
+            """
+            SELECT
+                e.id,
+                e.title,
+                e.description,
+                e.source,
+                e.url,
+                e.published_at,
+                s.positive,
+                s.negative,
+                s.neutral,
+                s.label      AS sentiment_label,
+                s.confidence AS sentiment_confidence,
+                c.risk_type,
+                c.asset_class,
+                c.severity,
+                c.direction
+            FROM news_events e
+            LEFT JOIN sentiment_scores    s ON s.event_id = e.id
+            LEFT JOIN risk_classifications c ON c.event_id = e.id
+            WHERE e.published_at >= datetime('now', ? )
+            ORDER BY e.published_at DESC
+            LIMIT ?
+            """,
+            conn,
+            params=(f"-{days} days", limit),
+        )
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def fetch_heatmap_data() -> pd.DataFrame:
     """Aggregate avg severity by (asset_class, risk_type) for the heatmap."""
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT
-            c.asset_class,
-            c.risk_type,
-            AVG(c.severity)        AS avg_severity,
-            COUNT(*)               AS event_count
-        FROM risk_classifications c
-        JOIN news_events e ON e.id = c.event_id
-        WHERE e.published_at >= datetime('now', '-7 days')
-          AND c.asset_class IS NOT NULL
-          AND c.risk_type   IS NOT NULL
-        GROUP BY c.asset_class, c.risk_type
-        """,
-        conn,
-    )
-    conn.close()
-    return df
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query(
+            """
+            SELECT
+                c.asset_class,
+                c.risk_type,
+                AVG(c.severity)        AS avg_severity,
+                COUNT(*)               AS event_count
+            FROM risk_classifications c
+            JOIN news_events e ON e.id = c.event_id
+            WHERE e.published_at >= datetime('now', '-7 days')
+              AND c.asset_class IS NOT NULL
+              AND c.risk_type   IS NOT NULL
+            GROUP BY c.asset_class, c.risk_type
+            """,
+            conn,
+        )
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def fetch_sentiment_trend(days: int = 14) -> pd.DataFrame:
     """Daily average sentiment score per asset class for trend lines."""
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT
-            date(e.published_at)          AS date,
-            c.asset_class,
-            AVG(s.positive - s.negative)  AS net_sentiment,
-            AVG(s.positive)               AS avg_positive,
-            AVG(s.negative)               AS avg_negative,
-            COUNT(*)                      AS event_count
-        FROM news_events e
-        JOIN sentiment_scores     s ON s.event_id = e.id
-        JOIN risk_classifications c ON c.event_id = e.id
-        WHERE e.published_at >= datetime('now', ? )
-          AND c.asset_class IS NOT NULL
-        GROUP BY date(e.published_at), c.asset_class
-        ORDER BY date ASC
-        """,
-        conn,
-        params=(f"-{days} days",),
-    )
-    conn.close()
-    return df
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query(
+            """
+            SELECT
+                date(e.published_at)          AS date,
+                c.asset_class,
+                AVG(s.positive - s.negative)  AS net_sentiment,
+                AVG(s.positive)               AS avg_positive,
+                AVG(s.negative)               AS avg_negative,
+                COUNT(*)                      AS event_count
+            FROM news_events e
+            JOIN sentiment_scores     s ON s.event_id = e.id
+            JOIN risk_classifications c ON c.event_id = e.id
+            WHERE e.published_at >= datetime('now', ? )
+              AND c.asset_class IS NOT NULL
+            GROUP BY date(e.published_at), c.asset_class
+            ORDER BY date ASC
+            """,
+            conn,
+            params=(f"-{days} days",),
+        )
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def fetch_event_by_id(event_id: int) -> pd.DataFrame:
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """
-        SELECT
-            e.id, e.title, e.description, e.source, e.url, e.published_at,
-            s.positive, s.negative, s.neutral, s.label AS sentiment_label, s.confidence,
-            c.risk_type, c.asset_class, c.severity, c.direction
-        FROM news_events e
-        LEFT JOIN sentiment_scores     s ON s.event_id = e.id
-        LEFT JOIN risk_classifications c ON c.event_id = e.id
-        WHERE e.id = ?
-        """,
-        conn,
-        params=(event_id,),
-    )
-    conn.close()
-    return df
+    try:
+        conn = get_connection()
+        df = pd.read_sql_query(
+            """
+            SELECT
+                e.id, e.title, e.description, e.source, e.url, e.published_at,
+                s.positive, s.negative, s.neutral, s.label AS sentiment_label, s.confidence,
+                c.risk_type, c.asset_class, c.severity, c.direction
+            FROM news_events e
+            LEFT JOIN sentiment_scores     s ON s.event_id = e.id
+            LEFT JOIN risk_classifications c ON c.event_id = e.id
+            WHERE e.id = ?
+            """,
+            conn,
+            params=(event_id,),
+        )
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 def count_unprocessed_events() -> int:
-    conn = get_connection()
-    cur = conn.execute(
-        "SELECT COUNT(*) FROM news_events e "
-        "WHERE NOT EXISTS (SELECT 1 FROM sentiment_scores s WHERE s.event_id = e.id)"
-    )
-    n = cur.fetchone()[0]
-    conn.close()
-    return n
+    try:
+        conn = get_connection()
+        cur = conn.execute(
+            "SELECT COUNT(*) FROM news_events e "
+            "WHERE NOT EXISTS (SELECT 1 FROM sentiment_scores s WHERE s.event_id = e.id)"
+        )
+        n = cur.fetchone()[0]
+        conn.close()
+        return n
+    except Exception:
+        return 0

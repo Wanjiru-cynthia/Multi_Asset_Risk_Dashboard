@@ -26,13 +26,16 @@ st.markdown('<h1 style="color:#2A9D8F">📋 Event Detail View</h1>', unsafe_allo
 # ── event selector ────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_recent_events() -> pd.DataFrame:
-    return fetch_enriched_events(days=14, limit=300)
+    try:
+        return fetch_enriched_events(days=14, limit=300)
+    except Exception:
+        return pd.DataFrame()
 
 
 events_df = load_recent_events()
 
 if events_df.empty:
-    st.warning("No events in the database yet. Run `python ingest.py` first.")
+    st.warning("No events in the database yet — the pipeline is initialising. Check back in a moment.")
     st.stop()
 
 # If navigated here from drilldown page, pre-select that event
