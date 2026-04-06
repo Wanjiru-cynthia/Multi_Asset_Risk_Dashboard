@@ -1,23 +1,8 @@
 import streamlit as st
-
-st.set_page_config(
-    page_title="Risk Intelligence Dashboard",
-    page_icon="⚠",
-    layout="wide",
-)
-
-st.title("Cross-Asset Risk Intelligence Dashboard")
-st.markdown(
-    "Real-time financial news scoring with **FinBERT** NLP — "
-    "covering equities, fixed income, FX, and commodities across "
-    "credit, market, geopolitical, operational, and liquidity risk dimensions."
-)
-st.markdown("---")
-st.markdown("""
-Use the **sidebar** to navigate:
-
-- **Overview** — risk heatmap, sentiment trends, live event feed
-- **Asset Drilldown** — price charts and vol metrics by asset class
-- **Event Detail** — full FinBERT scores and classification per event
-- **Macro Backdrop** — live FRED indicators: VIX, yield curve, credit spreads, DXY
-""")
+st.set_page_config(page_title="Cross-Asset Risk Intelligence", layout="wide")
+st.title("Cross-Asset Risk Intelligence")
+st.markdown("Navigate using the sidebar to explore the dashboard.")
+st.page_link("dashboard/pages/1_Overview.py", label="Overview", icon="📊")
+st.page_link("dashboard/pages/2_Asset_Drilldown.py", label="Asset Drilldown", icon="🔍")
+st.page_link("dashboard/pages/3_Event_Detail.py", label="Event Detail", icon="📋")
+st.page_link("dashboard/pages/4_Macro_Backdrop.py", label="Macro Backdrop", icon="🛰")
