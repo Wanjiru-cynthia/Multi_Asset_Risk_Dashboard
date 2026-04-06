@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / ".env", override=True)
 
 import streamlit as st
-from data.database import initialize_db, get_connection
 
 st.set_page_config(
     page_title="Risk Intelligence Dashboard",
@@ -20,58 +19,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-
-# ── auto-bootstrap on first launch ───────────────────────────────────────────
-
-def _db_is_empty() -> bool:
-    """Return True if the news_events table has no rows. Never raises."""
-    try:
-        initialize_db()
-        conn = get_connection()
-        count = conn.execute("SELECT COUNT(*) FROM news_events").fetchone()[0]
-        conn.close()
-        return int(count) == 0
-    except Exception:
-        return False  # can't confirm empty → don't block render
-
-
-def _run_ingestion(days: int = 3) -> tuple[bool, str]:
-    """Run ingest.py as a subprocess. Returns (success, log_tail). Never raises."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).parent.parent / "ingest.py"),
-             "--days", str(days)],
-            capture_output=True, text=True, timeout=600,
-        )
-        log = (result.stdout + result.stderr)[-3000:]
-        return result.returncode == 0, log
-    except Exception as exc:
-        return False, str(exc)
-
-
-# Guard with a single session-state flag so bootstrap only fires once per session
-# and never blocks the page from rendering — the result banner appears above content.
-if "bootstrap_attempted" not in st.session_state:
-    st.session_state["bootstrap_attempted"] = True
-    if _db_is_empty():
-        with st.spinner("⏳ First launch — initialising database and running ingestion pipeline …"):
-            ok, log = _run_ingestion(days=3)
-        if ok:
-            st.success(
-                "Database initialised and pipeline complete. "
-                "Navigate to **Overview** to explore the data."
-            )
-        else:
-            st.warning(
-                "Auto-ingestion did not complete — check that API keys are set in Streamlit Cloud secrets. "
-                "Use the **Run Pipeline Now** button below to retry."
-            )
-            if log:
-                with st.expander("Show error log"):
-                    st.code(log)
-
 
 # ── sidebar navigation header ────────────────────────────────────────────────
 with st.sidebar:
@@ -143,12 +90,13 @@ with col4:
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
-st.info("**Navigate using the pages in the sidebar.** The database is auto-populated on first launch — use the manual trigger below to refresh with the latest headlines.")
+st.info("**Navigate using the pages in the sidebar.** Use the pipeline trigger below to populate or refresh the database.")
 
-# ── quick pipeline trigger ───────────────────────────────────────────────────
+# ── manual pipeline trigger ───────────────────────────────────────────────────
 st.markdown("---")
 st.markdown("### Quick Ingestion")
 col_a, col_b = st.columns([2, 4])
+
 with col_a:
     days = st.number_input("Days of news to fetch", min_value=1, max_value=7, value=3)
     if st.button("🔄 Run Pipeline Now", type="primary"):
@@ -158,10 +106,10 @@ with col_a:
                 result = subprocess.run(
                     [sys.executable, str(Path(__file__).parent.parent / "ingest.py"),
                      "--days", str(days)],
-                    capture_output=True, text=True, timeout=300,
+                    capture_output=True, text=True, timeout=600,
                 )
                 if result.returncode == 0:
-                    st.success("Pipeline complete. Reload the Overview page to see fresh data.")
+                    st.success("Pipeline complete. Navigate to Overview to see fresh data.")
                     st.code(result.stdout[-2000:] if result.stdout else "Done.")
                 else:
                     st.error("Pipeline failed.")
