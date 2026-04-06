@@ -8,7 +8,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+
 import streamlit as st
+from data.database import initialize_db, get_connection
 
 st.set_page_config(
     page_title="Risk Intelligence Dashboard",
@@ -16,6 +20,48 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+
+# ── auto-bootstrap on first launch ───────────────────────────────────────────
+
+def _db_is_empty() -> bool:
+    """Return True if the news_events table has no rows."""
+    try:
+        initialize_db()
+        conn = get_connection()
+        count = conn.execute("SELECT COUNT(*) FROM news_events").fetchone()[0]
+        conn.close()
+        return count == 0
+    except Exception:
+        return True
+
+
+def _run_ingestion(days: int = 3) -> tuple[bool, str]:
+    """Run ingest.py as a subprocess. Returns (success, log_tail)."""
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, str(Path(__file__).parent.parent / "ingest.py"),
+         "--days", str(days)],
+        capture_output=True, text=True, timeout=600,
+    )
+    log = (result.stdout + result.stderr)[-3000:]
+    return result.returncode == 0, log
+
+
+if _db_is_empty() and "bootstrap_done" not in st.session_state:
+    st.session_state["bootstrap_done"] = False
+    with st.spinner("⏳ First launch — initialising database and running ingestion pipeline …"):
+        ok, log = _run_ingestion(days=3)
+    if ok:
+        st.session_state["bootstrap_done"] = True
+        st.success(
+            "Database initialised and pipeline complete. "
+            "Navigate to **Overview** to explore the data."
+        )
+    else:
+        st.error("Auto-ingestion failed. Check your API keys in `.env` and use the manual trigger below.")
+        st.code(log)
+
 
 # ── sidebar navigation header ────────────────────────────────────────────────
 with st.sidebar:
@@ -87,7 +133,7 @@ with col4:
     """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
-st.info("**Navigate using the pages in the sidebar.** Run `python ingest.py` first to populate the database.")
+st.info("**Navigate using the pages in the sidebar.** The database is auto-populated on first launch — use the manual trigger below to refresh with the latest headlines.")
 
 # ── quick pipeline trigger ───────────────────────────────────────────────────
 st.markdown("---")
