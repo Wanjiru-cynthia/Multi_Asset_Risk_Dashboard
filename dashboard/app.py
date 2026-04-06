@@ -25,42 +25,52 @@ st.set_page_config(
 # ── auto-bootstrap on first launch ───────────────────────────────────────────
 
 def _db_is_empty() -> bool:
-    """Return True if the news_events table has no rows."""
+    """Return True if the news_events table has no rows. Never raises."""
     try:
         initialize_db()
         conn = get_connection()
         count = conn.execute("SELECT COUNT(*) FROM news_events").fetchone()[0]
         conn.close()
-        return count == 0
+        return int(count) == 0
     except Exception:
-        return True
+        return False  # can't confirm empty → don't block render
 
 
 def _run_ingestion(days: int = 3) -> tuple[bool, str]:
-    """Run ingest.py as a subprocess. Returns (success, log_tail)."""
+    """Run ingest.py as a subprocess. Returns (success, log_tail). Never raises."""
     import subprocess
-    result = subprocess.run(
-        [sys.executable, str(Path(__file__).parent.parent / "ingest.py"),
-         "--days", str(days)],
-        capture_output=True, text=True, timeout=600,
-    )
-    log = (result.stdout + result.stderr)[-3000:]
-    return result.returncode == 0, log
-
-
-if _db_is_empty() and "bootstrap_done" not in st.session_state:
-    st.session_state["bootstrap_done"] = False
-    with st.spinner("⏳ First launch — initialising database and running ingestion pipeline …"):
-        ok, log = _run_ingestion(days=3)
-    if ok:
-        st.session_state["bootstrap_done"] = True
-        st.success(
-            "Database initialised and pipeline complete. "
-            "Navigate to **Overview** to explore the data."
+    try:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).parent.parent / "ingest.py"),
+             "--days", str(days)],
+            capture_output=True, text=True, timeout=600,
         )
-    else:
-        st.error("Auto-ingestion failed. Check your API keys in `.env` and use the manual trigger below.")
-        st.code(log)
+        log = (result.stdout + result.stderr)[-3000:]
+        return result.returncode == 0, log
+    except Exception as exc:
+        return False, str(exc)
+
+
+# Guard with a single session-state flag so bootstrap only fires once per session
+# and never blocks the page from rendering — the result banner appears above content.
+if "bootstrap_attempted" not in st.session_state:
+    st.session_state["bootstrap_attempted"] = True
+    if _db_is_empty():
+        with st.spinner("⏳ First launch — initialising database and running ingestion pipeline …"):
+            ok, log = _run_ingestion(days=3)
+        if ok:
+            st.success(
+                "Database initialised and pipeline complete. "
+                "Navigate to **Overview** to explore the data."
+            )
+        else:
+            st.warning(
+                "Auto-ingestion did not complete — check that API keys are set in Streamlit Cloud secrets. "
+                "Use the **Run Pipeline Now** button below to retry."
+            )
+            if log:
+                with st.expander("Show error log"):
+                    st.code(log)
 
 
 # ── sidebar navigation header ────────────────────────────────────────────────
