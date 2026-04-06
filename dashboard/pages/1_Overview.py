@@ -46,11 +46,20 @@ st.markdown("---")
 # ── data load ─────────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_data(days: int):
-    return (
-        fetch_heatmap_data(),
-        fetch_sentiment_trend(days=days),
-        fetch_enriched_events(days=days, limit=200),
-    )
+    empty = pd.DataFrame()
+    try:
+        heatmap = fetch_heatmap_data()
+    except Exception:
+        heatmap = empty
+    try:
+        trend = fetch_sentiment_trend(days=days)
+    except Exception:
+        trend = empty
+    try:
+        events = fetch_enriched_events(days=days, limit=200)
+    except Exception:
+        events = empty
+    return heatmap, trend, events
 
 
 heatmap_df, trend_df, events_df = load_data(lookback_days)
