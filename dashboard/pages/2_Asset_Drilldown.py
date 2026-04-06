@@ -50,15 +50,21 @@ st.markdown("---")
 # ── market quotes ─────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def load_quotes(ac: str) -> pd.DataFrame:
-    return fetch_latest_quotes(asset_class=ac)
+    try:
+        return fetch_latest_quotes(asset_class=ac)
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_events(ac: str) -> pd.DataFrame:
-    df = fetch_enriched_events(days=14, limit=500)
-    if df.empty:
-        return df
-    return df[df["asset_class"] == ac]
+    try:
+        df = fetch_enriched_events(days=14, limit=500)
+        if df.empty:
+            return df
+        return df[df["asset_class"] == ac]
+    except Exception:
+        return pd.DataFrame()
 
 
 quotes = load_quotes(selected_ac)
