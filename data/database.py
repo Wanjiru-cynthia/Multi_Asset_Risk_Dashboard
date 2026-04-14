@@ -315,7 +315,7 @@ def fetch_risk_events(
 
         where_sql = " AND ".join(where_clauses)
 
-        df = pd.read_sql_query(
+        df = _query_df(
             f"""
             SELECT
                 c.id              AS cluster_id,
@@ -349,10 +349,8 @@ def fetch_risk_events(
             ORDER BY c.composite_score DESC, c.last_seen DESC
             LIMIT %s
             """,
-            conn,
-            params=params + [limit],
+            params + [limit],
         )
-        conn.close()
 
         if not df.empty and "sources_json" in df.columns:
             df["sources_list"] = df["sources_json"].apply(
@@ -365,9 +363,8 @@ def fetch_risk_events(
 
 def fetch_heatmap_data(days: int = 7) -> pd.DataFrame:
     try:
-        conn = get_connection()
         cutoff = _cutoff(days)
-        df = pd.read_sql_query(
+        return _query_df(
             """
             SELECT
                 ac.asset_class,
@@ -382,20 +379,16 @@ def fetch_heatmap_data(days: int = 7) -> pd.DataFrame:
             WHERE c.last_seen >= %s
             GROUP BY ac.asset_class, rt.risk_type
             """,
-            conn,
-            params=[cutoff],
+            [cutoff],
         )
-        conn.close()
-        return df
     except Exception:
         return pd.DataFrame()
 
 
 def fetch_sentiment_trend(days: int = 14) -> pd.DataFrame:
     try:
-        conn = get_connection()
         cutoff = _cutoff(days)
-        df = pd.read_sql_query(
+        return _query_df(
             """
             SELECT
                 LEFT(e.published_at, 10)          AS date,
@@ -412,20 +405,16 @@ def fetch_sentiment_trend(days: int = 14) -> pd.DataFrame:
             GROUP BY LEFT(e.published_at, 10), ac.asset_class
             ORDER BY date ASC
             """,
-            conn,
-            params=[cutoff],
+            [cutoff],
         )
-        conn.close()
-        return df
     except Exception:
         return pd.DataFrame()
 
 
 def fetch_composite_trend(days: int = 14) -> pd.DataFrame:
     try:
-        conn = get_connection()
         cutoff = _cutoff(days)
-        df = pd.read_sql_query(
+        return _query_df(
             """
             SELECT
                 LEFT(c.last_seen, 10)   AS date,
@@ -438,37 +427,29 @@ def fetch_composite_trend(days: int = 14) -> pd.DataFrame:
             GROUP BY LEFT(c.last_seen, 10), rt.risk_type
             ORDER BY date ASC
             """,
-            conn,
-            params=[cutoff],
+            [cutoff],
         )
-        conn.close()
-        return df
     except Exception:
         return pd.DataFrame()
 
 
 def fetch_narrative_stats(days: int = 30) -> pd.DataFrame:
     try:
-        conn = get_connection()
-        df = pd.read_sql_query(
+        return _query_df(
             """
             SELECT label, event_count, avg_severity, avg_sentiment,
                    first_seen, last_seen, trend
             FROM narratives
             ORDER BY event_count DESC
-            """,
-            conn,
+            """
         )
-        conn.close()
-        return df
     except Exception:
         return pd.DataFrame()
 
 
 def fetch_cluster_events(cluster_id: int) -> pd.DataFrame:
     try:
-        conn = get_connection()
-        df = pd.read_sql_query(
+        return _query_df(
             """
             SELECT
                 e.id, e.title, e.description, e.source, e.url, e.published_at, e.region,
@@ -481,17 +462,29 @@ def fetch_cluster_events(cluster_id: int) -> pd.DataFrame:
             WHERE e.cluster_id = %s
             ORDER BY e.published_at DESC
             """,
-            conn,
-            params=[cluster_id],
+            [cluster_id],
         )
-        conn.close()
-        return df
     except Exception:
         return pd.DataFrame()
 
 
 def fetch_enriched_events(days: int = 7, limit: int = 500) -> pd.DataFrame:
     return fetch_risk_events(days=days, limit=limit)
+
+
+def _query_df(sql: str, params: list | None = None) -> pd.DataFrame:
+    """Execute a SELECT and return results as a DataFrame — avoids SQLAlchemy dependency."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params or [])
+        if cur.description is None:
+            return pd.DataFrame()
+        cols = [d[0] for d in cur.description]
+        rows = [dict(r) for r in cur.fetchall()]
+        return pd.DataFrame(rows, columns=cols)
+    finally:
+        conn.close()
 
 
 def count_unprocessed_events() -> int:
