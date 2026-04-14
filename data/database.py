@@ -21,10 +21,12 @@ def _cutoff(days: int) -> str:
 
 def get_connection():
     url = os.environ["DATABASE_URL"]
-    # Supabase requires SSL; add sslmode if not already specified
     if "sslmode" not in url:
         url += ("&" if "?" in url else "?") + "sslmode=require"
-    return psycopg2.connect(url, cursor_factory=psycopg2.extras.DictCursor)
+    conn = psycopg2.connect(url, cursor_factory=psycopg2.extras.DictCursor)
+    # Required for Supabase connection pooler (Supavisor transaction mode)
+    conn.autocommit = False
+    return conn
 
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
