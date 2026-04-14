@@ -23,21 +23,6 @@ def _start_scheduler():
 _start_scheduler()
 
 
-@st.cache_resource
-def _seed_on_startup():
-    """Run the ingest pipeline once on startup if the database is empty."""
-    import subprocess, sys
-    from pathlib import Path
-    from data.database import has_data
-    if not has_data():
-        root = str(Path(__file__).parent.parent.parent)
-        subprocess.Popen(
-            [sys.executable, str(Path(root) / "ingest.py"), "--days", "3"],
-            cwd=root,
-        )
-
-_seed_on_startup()
-
 
 def _indicator_color(series_id: str, value: float | None) -> str:
     """Return a hex colour for the metric delta based on risk signal."""
