@@ -490,6 +490,22 @@ def _query_df(sql: str, params: list | None = None) -> pd.DataFrame:
         conn.close()
 
 
+def test_connection() -> tuple[bool, str]:
+    """Return (ok, message) — used by the sidebar to surface connection errors."""
+    try:
+        url = os.environ.get("DATABASE_URL", "")
+        if not url:
+            return False, "DATABASE_URL environment variable is not set"
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM event_clusters")
+        n = cur.fetchone()[0]
+        conn.close()
+        return True, f"Connected — {n} clusters in database"
+    except Exception as e:
+        return False, str(e)
+
+
 def count_unprocessed_events() -> int:
     try:
         conn = get_connection()
