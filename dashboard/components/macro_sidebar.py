@@ -56,10 +56,11 @@ def render_macro_sidebar() -> None:
         unsafe_allow_html=True,
     )
 
-    # Show a visible error if DATABASE_URL is missing
-    import os
-    if not os.environ.get("DATABASE_URL"):
-        st.error("DATABASE_URL not set — add it to Streamlit Cloud secrets.", icon="🔴")
+    # Show database connection status
+    from data.database import test_connection
+    ok, msg = test_connection()
+    if not ok:
+        st.error(f"DB error: {msg}", icon="🔴")
 
     with st.sidebar:
         st.markdown("---")
