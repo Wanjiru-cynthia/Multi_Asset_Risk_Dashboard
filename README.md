@@ -16,23 +16,13 @@ I built this to be something a portfolio manager or risk analyst can actually op
 
 ---
 
-## Screenshots
-
-| Risk Events | Risk Trends | Market Summary |
-|-------------|-------------|----------------|
-| *(screenshot)* | *(screenshot)* | *(screenshot)* |
-
-> To add screenshots: drop images into a `docs/` folder and replace the placeholders above with `![Risk Events](docs/risk_events.png)` etc.
-
----
-
 ## Pages
 
 ### Risk Events
 
-This is the main feed. It shows every classified news event from the past several days, ranked by composite risk score. You can filter by asset class (equities, fixed income, FX, commodities), risk type (market, credit, geopolitical, operational, liquidity), severity band, region, and time window.
+This is the main feed. It shows every classified news event from the past several days (3,7,14,30), ranked by composite risk score. You can filter by asset class (equities, fixed income, FX, commodities), risk type (market, credit, geopolitical, operational, liquidity), severity band, region, and time window.
 
-Each entry shows the FinBERT sentiment label, severity band, narrative theme, number of sources covering the same story, and a link to the original article. Stories reported by multiple outlets appear as a single clustered event with a higher composite score — so a banking stress story covered by Reuters, Bloomberg, and the FT will surface higher than a one source item with the same text.
+Each entry shows the FinBERT sentiment label, severity band, narrative theme, number of sources covering the same story, and a link to the original article. Stories reported by multiple outlets appear as a single clustered event with a higher composite score, so a banking stress story covered by Reuters, Bloomberg, and the FT will surface higher than a one source item with the same text.
 
 ### Risk Trends
 
@@ -40,7 +30,7 @@ Time series charts showing how the risk signal has evolved over the lookback win
 
 ### Market Summary
 
-A cross asset snapshot covering sixteen instruments: four equity ETFs (SPY, QQQ, IWM, DIA), four fixed income ETFs (TLT, HYG, LQD, AGG), four currency pairs (EUR/USD, GBP/USD, USD/JPY, AUD/USD), and four commodities (Gold, Oil, Silver, Copper). Shows current price, 30 day return, and 30 day realized volatility. Gives context for reading the event feed — if oil is down 12% over 30 days and an energy supply story surfaces, the market is already pricing something in.
+A cross asset snapshot covering sixteen instruments: four equity ETFs (SPY, QQQ, IWM, DIA), four fixed income ETFs (TLT, HYG, LQD, AGG), four currency pairs (EUR/USD, GBP/USD, USD/JPY, AUD/USD), and four commodities (Gold, Oil, Silver, Copper). Shows current price, 30 day return, and 30 day realized volatility. Gives context for reading the event feed for instance, if oil is down 12% over 30 days and an energy supply story surfaces, the market is already pricing something in.
 
 ### Macro Sidebar (every page)
 
@@ -135,91 +125,6 @@ The APScheduler library runs a background scheduler inside the Streamlit process
 | Scheduler | APScheduler |
 | Data processing | Pandas, NumPy, SciPy |
 | Config | python-dotenv |
-
----
-
-## Setup
-
-### Requirements
-
-- Python 3.10 or later
-- About 1 GB of disk space for the FinBERT model (downloaded once from HuggingFace and cached)
-- Free API keys from [NewsAPI](https://newsapi.org) and [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)
-- A PostgreSQL database URL — [Neon](https://neon.tech) has a free tier that works well here
-
-### Install
-
-```bash
-git clone https://github.com/Wanjiru-cynthia/Risk_Dashboard.git
-cd Risk_Dashboard
-pip install -r requirements.txt
-```
-
-### Configure
-
-Create a `.env` file in the project root:
-
-```env
-NEWS_API_KEY=your_newsapi_key
-FRED_API_KEY=your_fred_key
-DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
-```
-
-For Streamlit Cloud, add these under **App Settings → Secrets** instead of committing the file.
-
-### Seed the Database
-
-```bash
-# Pull the last 3 days of news and run the full pipeline
-python ingest.py
-
-# Or specify a longer lookback window
-python ingest.py --days 7
-```
-
-The first run downloads FinBERT (~440 MB). Every run after that is incremental — only new unscored events are processed.
-
-### Run the Dashboard
-
-```bash
-streamlit run dashboard/app.py
-```
-
-Open `http://localhost:8501`.
-
----
-
-## Project Structure
-
-```
-risk-dashboard/
-├── .env                          # API keys (not committed)
-├── requirements.txt
-├── ingest.py                     # Master pipeline — run this to seed or refresh
-│
-├── data/
-│   ├── database.py               # Schema, query helpers, insert functions
-│   ├── news_ingestion.py         # NewsAPI fetcher
-│   ├── market_data.py            # yfinance price, vol, returns
-│   └── macro_data.py             # FRED series fetcher
-│
-├── nlp/
-│   ├── finbert_pipeline.py       # FinBERT sentiment, batched
-│   ├── classifier.py             # Asset class and risk type classification
-│   ├── severity.py               # Four component severity index
-│   ├── composite_score.py        # Composite score with recency decay
-│   ├── narratives.py             # Narrative theme labeling and tracking
-│   └── deduplication.py          # SHA1 cluster key, 48 hour event grouping
-│
-└── dashboard/
-    ├── app.py                    # Entry point
-    ├── components/
-    │   └── macro_sidebar.py      # Live FRED panel, shown on every page
-    └── pages/
-        ├── 1_Risk_Events.py
-        ├── 2_Risk_Trends.py
-        └── 3_Market_Summary.py
-```
 
 ---
 
