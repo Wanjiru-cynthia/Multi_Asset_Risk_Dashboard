@@ -23,7 +23,6 @@ st.set_page_config(page_title="Risk Events", layout="wide", page_icon="⚠")
 render_macro_sidebar()
 
 st.markdown('<h1 style="color:#E63946">⚠ Risk Events</h1>', unsafe_allow_html=True)
-st.caption("Deduplicated, multi-classified, composite-scored — ranked by risk significance")
 
 # ── colour maps ───────────────────────────────────────────────────────────────
 SEV_COLOR = {1:"#444",2:"#4361EE",3:"#F4A261",4:"#E76F51",5:"#E63946"}
