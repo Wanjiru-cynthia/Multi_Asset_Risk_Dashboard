@@ -1,15 +1,9 @@
 """
 Narrative / recurring-theme labeler.
-
-Maps a news text to one of a fixed set of thematic narratives using
-keyword matching. The best-matching narrative (most keyword hits) is
-returned. Falls back to "General Market News" when nothing matches.
-
-Narrative stats (event count, avg severity, avg sentiment) are
-maintained in the `narratives` DB table and updated on each ingest run.
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone
 
 NARRATIVE_PATTERNS: dict[str, list[str]] = {
     "Fed Policy Pivot": [
@@ -83,7 +77,6 @@ def _score(text: str, keywords: list[str]) -> int:
 
 
 def assign_narrative(title: str, description: str = "") -> str:
-    """Return the best-matching narrative label for the given text."""
     text = f"{title} {description or ''}".lower()
     best_label, best_score = FALLBACK_NARRATIVE, 0
     for label, keywords in NARRATIVE_PATTERNS.items():
@@ -94,32 +87,34 @@ def assign_narrative(title: str, description: str = "") -> str:
 
 
 def upsert_narrative(conn, label: str, sentiment_neg: float, severity_index: float) -> None:
-    """Insert or update a narrative row with running stats."""
-    existing = conn.execute(
-        "SELECT id, event_count, avg_severity, avg_sentiment FROM narratives WHERE label = ?",
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, event_count, avg_severity, avg_sentiment FROM narratives WHERE label = %s",
         (label,),
-    ).fetchone()
+    )
+    existing = cur.fetchone()
 
     if existing:
         n = existing["event_count"] + 1
-        new_sev = ((existing["avg_severity"] * existing["event_count"]) + severity_index) / n
-        new_sent = ((existing["avg_sentiment"] * existing["event_count"]) + sentiment_neg) / n
-        conn.execute(
+        new_sev  = ((existing["avg_severity"]  * existing["event_count"]) + severity_index) / n
+        new_sent = ((existing["avg_sentiment"] * existing["event_count"]) + sentiment_neg)  / n
+        cur.execute(
             """
             UPDATE narratives
-            SET event_count  = ?,
-                avg_severity = ?,
-                avg_sentiment = ?,
-                last_seen    = datetime('now')
-            WHERE id = ?
+            SET event_count   = %s,
+                avg_severity  = %s,
+                avg_sentiment = %s,
+                last_seen     = %s
+            WHERE id = %s
             """,
-            (n, round(new_sev, 4), round(new_sent, 4), existing["id"]),
+            (n, round(new_sev, 4), round(new_sent, 4), now, existing["id"]),
         )
     else:
-        conn.execute(
+        cur.execute(
             """
             INSERT INTO narratives (label, first_seen, last_seen, event_count, avg_severity, avg_sentiment)
-            VALUES (?, datetime('now'), datetime('now'), 1, ?, ?)
+            VALUES (%s, %s, %s, 1, %s, %s)
             """,
-            (label, round(severity_index, 4), round(sentiment_neg, 4)),
+            (label, now, now, round(severity_index, 4), round(sentiment_neg, 4)),
         )
