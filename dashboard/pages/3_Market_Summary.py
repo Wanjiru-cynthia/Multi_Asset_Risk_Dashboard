@@ -22,6 +22,7 @@ from data.market_data import fetch_latest_quotes, fetch_price_history, TICKERS
 from data.macro_data import fetch_latest_macro, fetch_macro_history, FRED_SERIES
 from dashboard.components.macro_sidebar import render_macro_sidebar
 
+st.set_page_config(page_title="Market Summary", page_icon="📊", layout="wide")
 render_macro_sidebar()
 
 st.markdown('<h1 style="color:#2A9D8F">📊 Market Summary</h1>', unsafe_allow_html=True)

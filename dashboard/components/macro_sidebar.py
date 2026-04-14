@@ -15,6 +15,14 @@ import streamlit as st
 from data.macro_data import fetch_latest_macro
 
 
+@st.cache_resource
+def _start_scheduler():
+    from scheduler import start_scheduler
+    return start_scheduler(interval_hours=6)
+
+_start_scheduler()
+
+
 def _indicator_color(series_id: str, value: float | None) -> str:
     """Return a hex colour for the metric delta based on risk signal."""
     if value is None:

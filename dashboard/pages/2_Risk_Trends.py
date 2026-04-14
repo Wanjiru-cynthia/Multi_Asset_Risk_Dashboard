@@ -23,6 +23,7 @@ from data.database import (
 )
 from dashboard.components.macro_sidebar import render_macro_sidebar
 
+st.set_page_config(page_title="Risk Trends", page_icon="📈", layout="wide")
 render_macro_sidebar()
 
 st.markdown('<h1 style="color:#4CC9F0">📈 Risk Trends</h1>', unsafe_allow_html=True)
