@@ -57,10 +57,13 @@ def render_macro_sidebar() -> None:
     )
 
     # Show database connection status
-    from data.database import test_connection
-    ok, msg = test_connection()
-    if not ok:
-        st.error(f"DB error: {msg}", icon="🔴")
+    try:
+        from data.database import test_connection
+        ok, msg = test_connection()
+        if not ok:
+            st.error(f"DB error: {msg}", icon="🔴")
+    except Exception as e:
+        st.error(f"Import/DB error: {e}", icon="🔴")
 
     with st.sidebar:
         st.markdown("---")
