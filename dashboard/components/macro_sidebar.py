@@ -51,11 +51,16 @@ def _load_macro() -> dict:
 
 def render_macro_sidebar() -> None:
     """Call this from any page to render the macro panel in st.sidebar."""
-    # Hide the app.py entrypoint that Streamlit auto-discovery adds as the first nav item
     st.markdown(
         "<style>[data-testid='stSidebarNav'] li:first-child{display:none!important}</style>",
         unsafe_allow_html=True,
     )
+
+    # Show a visible error if DATABASE_URL is missing
+    import os
+    if not os.environ.get("DATABASE_URL"):
+        st.error("DATABASE_URL not set — add it to Streamlit Cloud secrets.", icon="🔴")
+
     with st.sidebar:
         st.markdown("---")
         st.markdown("### 📡 Macro Backdrop")
