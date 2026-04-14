@@ -1,111 +1,191 @@
 # Cross-Asset Risk Intelligence Dashboard
-### Memorandum to the Chief Risk Officer
+
+A live risk monitoring dashboard that reads financial news, scores sentiment with a finance trained language model, classifies events by asset class and risk type, and shows everything in one place alongside real time market and macroeconomic data.
+
+**Live app:** [risk-dashboard.streamlit.app](https://risk-dashboard.streamlit.app) *(add your Streamlit Cloud URL here)*
 
 ---
 
-**To:** Chief Risk Officer  
-**From:** Risk Technology, Quantitative Strategies  
-**Subject:** Deployment Brief — Cross-Asset Risk Intelligence Platform  
-**Classification:** Internal Use Only
+## What It Does
+
+Most risk teams find out about a market moving event from a colleague, a news alert, or an end of day report. By then the price has already moved. This dashboard is my attempt to close that gap.
+
+Every time the app runs, it pulls the latest financial headlines, runs them through a sentiment model trained specifically on financial text, tags each story by asset class and risk type, groups duplicate stories from different outlets into a single event, and puts a composite risk score on it. The result is a live feed of ranked risk events that updates continuously, with six Federal Reserve indicators always visible in the sidebar so you never lose sight of the macro backdrop.
+
+I built this to be something a portfolio manager or risk analyst can actually open in the morning and use — not a proof of concept, but a working tool.
 
 ---
 
-## Executive Summary
+## Screenshots
 
-This platform operationalises a real-time, NLP-driven risk monitoring capability across four asset classes (equities, fixed income, FX, and commodities) and five risk dimensions (credit, market, geopolitical, operational, and liquidity). It ingests financial news at source, scores sentiment using a domain-fine-tuned language model (FinBERT), applies a rule-based risk taxonomy classifier, and surfaces the results through an interactive dashboard backed by live market data and Federal Reserve macro indicators.
+| Risk Events | Risk Trends | Market Summary |
+|-------------|-------------|----------------|
+| *(screenshot)* | *(screenshot)* | *(screenshot)* |
 
-The intent is to reduce the lag between a newsworthy risk event and its appearance in the portfolio risk management workflow — from hours to minutes.
+> To add screenshots: drop images into a `docs/` folder and replace the placeholders above with `![Risk Events](docs/risk_events.png)` etc.
 
 ---
 
-## Architecture Overview
+## Pages
+
+### Risk Events
+
+This is the main feed. It shows every classified news event from the past several days, ranked by composite risk score. You can filter by asset class (equities, fixed income, FX, commodities), risk type (market, credit, geopolitical, operational, liquidity), severity band, region, and time window.
+
+Each entry shows the FinBERT sentiment label, severity band, narrative theme, number of sources covering the same story, and a link to the original article. Stories reported by multiple outlets appear as a single clustered event with a higher composite score — so a banking stress story covered by Reuters, Bloomberg, and the FT will surface higher than a one source item with the same text.
+
+### Risk Trends
+
+Time series charts showing how the risk signal has evolved over the lookback window. This includes composite score over time, event volume by narrative theme, daily sentiment distribution, and severity distribution by day. It is useful for spotting whether a spike in risk events is a single day anomaly or a building regime shift.
+
+### Market Summary
+
+A cross asset snapshot covering sixteen instruments: four equity ETFs (SPY, QQQ, IWM, DIA), four fixed income ETFs (TLT, HYG, LQD, AGG), four currency pairs (EUR/USD, GBP/USD, USD/JPY, AUD/USD), and four commodities (Gold, Oil, Silver, Copper). Shows current price, 30 day return, and 30 day realized volatility. Gives context for reading the event feed — if oil is down 12% over 30 days and an energy supply story surfaces, the market is already pricing something in.
+
+### Macro Sidebar (every page)
+
+Six FRED indicators are always visible regardless of which page you are on: VIX, the 10 year minus 2 year Treasury spread, High Yield OAS, the trade weighted dollar index, the 10 year yield, and the Fed Funds rate. Each one is color coded: green for normal, amber for elevated, red for stress. Data refreshes every 15 minutes automatically.
+
+---
+
+## How It Works
+
+### Data Ingestion
+
+Headlines are fetched from NewsAPI across eight thematic queries — "financial risk", "market volatility", "central bank policy", "geopolitical risk", "credit markets", "energy markets", "banking sector", and "global recession". Results are restricted to nine premium financial domains. The full pipeline runs on demand via `ingest.py` and is also triggered automatically by an in process scheduler every six hours when the dashboard is running.
+
+### Deduplication
+
+Before any scoring happens, each article title is normalized (lowercased, punctuation stripped, stop words removed) and the top five remaining tokens are sorted and hashed with SHA1 to produce a cluster key. Any article with the same cluster key published within 48 hours of an existing cluster gets merged into that cluster rather than inserted as a new event. This prevents the same story from appearing twenty times because twenty outlets ran it.
+
+The source count on each cluster is the number of distinct outlets that covered that story. It is one of the four inputs to the composite score.
+
+### Sentiment Analysis
+
+Each event goes through [ProsusAI/finbert](https://huggingface.co/ProsusAI/finbert), a BERT base model fine tuned on financial communication text including earnings calls, analyst reports, and financial news. It returns three probability scores: positive, negative, and neutral. The highest probability determines the label; the score itself is the confidence. Events are processed in batches of 32 with automatic truncation to 512 tokens.
+
+### Severity Scoring
+
+Sentiment alone does not tell you how bad something is. A story that says "the bank is facing challenges" and a story that says "the bank collapsed in the largest failure since 2008" will both score negative on sentiment, but they are not the same risk signal. The severity index combines four components:
+
+| Component | Weight | How It Is Measured |
+|-----------|--------|--------------------|
+| Keyword tier | 40% | Crisis level terms (collapse, contagion, meltdown) score 3. Warning terms (plunge, shock, alarm) score 2. Watch terms (risk, pressure, concern) score 1. |
+| Entity breadth | 25% | Count of named financial entities in the title and description |
+| Dollar impact | 20% | Dollar amounts and percentage moves extracted from the text |
+| Reach score | 15% | Proxy for systemic scope — global events score higher than regional ones |
+
+The result is a 0 to 100 index mapped to four bands: LOW, MODERATE, HIGH, CRITICAL.
+
+### Composite Score
+
+Each event cluster gets a single composite risk score that combines all the signals:
 
 ```
-NewsAPI ──► news_ingestion.py ──► SQLite (risk_dashboard.db)
-                                        │
-yfinance ──► market_data.py             │
-                                        ▼
-fredapi  ──► macro_data.py      nlp/finbert_pipeline.py  (ProsusAI/finbert)
-                                        │
-                                nlp/classifier.py         (rule-based)
-                                        │
-                                        ▼
-                               dashboard/ (Streamlit, 4 pages)
+composite = (0.40 × avg_severity_index)
+          + (0.30 × avg_negative_sentiment × 100)
+          + (0.20 × recency_decay × 100)
+          + (0.10 × min(source_count / 10, 1.0) × 100)
 ```
 
-### Data Sources
-| Source | Coverage | Refresh |
-|--------|----------|---------|
-| **NewsAPI** | Financial headlines across 8 query themes, 9 premium domains | On-demand / scheduled |
-| **yfinance** | SPY, QQQ, IWM, DIA, TLT, HYG, LQD, AGG, EUR/USD, GBP/USD, USD/JPY, AUD/USD, Gold, Oil, Silver, Copper | 15-min cache |
-| **FRED (St. Louis Fed)** | VIX, 10Y–2Y spread, HY OAS, DXY, 10Y yield, Fed Funds | 15-min cache |
+Recency decay is exponential over 72 hours so older stories fade out as new ones come in:
 
-### NLP Pipeline
-1. **FinBERT** (`ProsusAI/finbert`) — financial-domain BERT model returning positive / negative / neutral probabilities with confidence score
-2. **Rule-based classifier** — keyword-weighted taxonomy assigning:
-   - `risk_type`: credit · market · geopolitical · operational · liquidity
-   - `asset_class`: equities · fixed_income · fx · commodities
-   - `severity`: 1 (informational) → 5 (crisis)
-   - `direction`: positive · negative · neutral for exposed positions
+```python
+hours_old = (now - last_seen_utc).total_seconds() / 3600
+recency_decay = exp(-hours_old / 72)
+```
+
+### Classification
+
+Each event is tagged across three dimensions using a keyword weighted rule based classifier:
+
+- **Asset class** (can be more than one): equities, fixed income, FX, commodities
+- **Risk type** (can be more than one, with subtypes): market, credit, geopolitical, operational, liquidity
+- **Region**: North America, Europe, Asia Pacific, Emerging Markets, Global
+- **Direction**: positive, negative, or neutral from the perspective of an exposed position
+
+I chose rule based classification here because it is fully transparent. A risk team can look at the keyword lists, understand exactly why an event was tagged a certain way, and adjust the lexicons without retraining a model.
+
+### Narrative Labeling
+
+Twelve recurring macro themes are tracked across the event stream:
+
+Fed Policy Pivot · China Economic Slowdown · Banking Sector Stress · Energy Price Shock · Geopolitical Escalation · Inflation and Rate Path · Credit Market Stress · Tech Sector Volatility · Currency Crisis · Commodity Supercycle · Sovereign Debt Risk · Housing Market Stress
+
+Each narrative tracks a running event count, rolling average severity, and rolling average negative sentiment, updated incrementally so historical data never needs to be reprocessed.
+
+### Automated Refresh
+
+The APScheduler library runs a background scheduler inside the Streamlit process. It re-triggers macro data fetches every six hours. FRED indicators in the sidebar cache for 15 minutes and refresh on their own. Market data via yfinance also caches for 15 minutes. The news ingestion pipeline can be run manually or scheduled externally via cron.
 
 ---
 
-## Dashboard Pages
+## Stack
 
-| Page | Purpose |
-|------|---------|
-| **Overview** | Risk heatmap (asset class × risk type), sentiment trend lines, live event feed with severity badges and filters |
-| **Asset Drilldown** | Per-asset-class price charts, 30-day vol, 30-day returns, filtered event feed, one-click to Event Detail |
-| **Event Detail** | Full FinBERT probability distribution, classification breakdown, regime context, similar event linkage |
-| **Macro Backdrop** | Live FRED panel, 90-day historical charts, automated regime assessment (Risk-On / Elevated / Crisis) |
-
-The macro panel (VIX, yield curve, HY spread, DXY) is surfaced in the sidebar on **every page** so the backdrop is always in view.
+| Layer | Tool |
+|-------|------|
+| Dashboard | Streamlit |
+| Sentiment model | ProsusAI/finbert (HuggingFace Transformers + PyTorch) |
+| Market data | yfinance |
+| Macro data | FRED API via fredapi |
+| News data | NewsAPI via newsapi-python |
+| Database | Neon PostgreSQL (serverless, HTTPS) |
+| Database driver | psycopg2 |
+| Charts | Plotly |
+| Scheduler | APScheduler |
+| Data processing | Pandas, NumPy, SciPy |
+| Config | python-dotenv |
 
 ---
 
 ## Setup
 
-### Prerequisites
-- Python 3.10+
-- ~1 GB free disk (FinBERT model download on first run)
+### Requirements
 
-### Installation
+- Python 3.10 or later
+- About 1 GB of disk space for the FinBERT model (downloaded once from HuggingFace and cached)
+- Free API keys from [NewsAPI](https://newsapi.org) and [FRED](https://fred.stlouisfed.org/docs/api/api_key.html)
+- A PostgreSQL database URL — [Neon](https://neon.tech) has a free tier that works well here
+
+### Install
 
 ```bash
-cd risk-dashboard
+git clone https://github.com/Wanjiru-cynthia/Risk_Dashboard.git
+cd Risk_Dashboard
 pip install -r requirements.txt
 ```
 
-### Configuration
+### Configure
 
-Edit `.env`:
+Create a `.env` file in the project root:
 
 ```env
-NEWS_API_KEY=55985387ad244aa6aa87cabe983d3007
-FRED_API_KEY=<your_free_key_from_fred.stlouisfed.org>
+NEWS_API_KEY=your_newsapi_key
+FRED_API_KEY=your_fred_key
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 ```
 
-> FRED API keys are free. Register at: https://fred.stlouisfed.org/docs/api/api_key.html
+For Streamlit Cloud, add these under **App Settings → Secrets** instead of committing the file.
 
-### Running the Pipeline
+### Seed the Database
 
 ```bash
-# Fetch headlines, run FinBERT, classify, persist to SQLite
+# Pull the last 3 days of news and run the full pipeline
 python ingest.py
 
-# Optional: specify lookback window
+# Or specify a longer lookback window
 python ingest.py --days 7
 ```
 
-**First run:** FinBERT model downloads from HuggingFace (~440 MB). Cached locally thereafter.
+The first run downloads FinBERT (~440 MB). Every run after that is incremental — only new unscored events are processed.
 
-### Launching the Dashboard
+### Run the Dashboard
 
 ```bash
 streamlit run dashboard/app.py
 ```
 
-Navigate to `http://localhost:8501` — the dashboard includes a one-click pipeline trigger on the landing page.
+Open `http://localhost:8501`.
 
 ---
 
@@ -114,59 +194,37 @@ Navigate to `http://localhost:8501` — the dashboard includes a one-click pipel
 ```
 risk-dashboard/
 ├── .env                          # API keys (not committed)
-├── .streamlit/config.toml        # Dark theme + server config
 ├── requirements.txt
-├── ingest.py                     # Master pipeline orchestrator
-├── risk_dashboard.db             # SQLite (created on first ingest)
+├── ingest.py                     # Master pipeline — run this to seed or refresh
 │
 ├── data/
-│   ├── database.py               # Schema, insert helpers, query layer
-│   ├── news_ingestion.py         # NewsAPI fetcher + deduplication
-│   ├── market_data.py            # yfinance price/vol/returns
+│   ├── database.py               # Schema, query helpers, insert functions
+│   ├── news_ingestion.py         # NewsAPI fetcher
+│   ├── market_data.py            # yfinance price, vol, returns
 │   └── macro_data.py             # FRED series fetcher
 │
 ├── nlp/
-│   ├── finbert_pipeline.py       # FinBERT sentiment (batch + single)
-│   └── classifier.py             # Rule-based risk taxonomy
+│   ├── finbert_pipeline.py       # FinBERT sentiment, batched
+│   ├── classifier.py             # Asset class and risk type classification
+│   ├── severity.py               # Four component severity index
+│   ├── composite_score.py        # Composite score with recency decay
+│   ├── narratives.py             # Narrative theme labeling and tracking
+│   └── deduplication.py          # SHA1 cluster key, 48 hour event grouping
 │
 └── dashboard/
-    ├── app.py                    # Landing page + pipeline trigger
+    ├── app.py                    # Entry point
     ├── components/
-    │   ├── macro_sidebar.py      # Always-visible macro panel
-    │   └── charts.py             # All Plotly chart renderers
+    │   └── macro_sidebar.py      # Live FRED panel, shown on every page
     └── pages/
-        ├── 1_Overview.py
-        ├── 2_Asset_Drilldown.py
-        ├── 3_Event_Detail.py
-        └── 4_Macro_Backdrop.py
+        ├── 1_Risk_Events.py
+        ├── 2_Risk_Trends.py
+        └── 3_Market_Summary.py
 ```
 
 ---
 
-## Operational Notes
+## Author
 
-**Severity Scale**
-
-| Level | Label | Trigger Criteria |
-|-------|-------|-----------------|
-| 5 | CRITICAL | Systemic language: "collapse", "crisis", "contagion", "meltdown" |
-| 4 | HIGH | "plunge", "surge", "shock", "warning", "alarm" |
-| 3 | MODERATE | "risk", "concern", "pressure", "volatile", "uncertainty" |
-| 2 | WATCH | "slight", "marginal", "modest" movement language |
-| 1 | LOW | General financial reporting, no stress signals detected |
-
-**Known Limitations**
-- NewsAPI free tier returns up to 100 articles per query; premium tier recommended for production
-- FinBERT runs on CPU by default; set `device=0` in `finbert_pipeline.py` for GPU acceleration
-- FRED data has publication lag (typically T+1 to T+5 depending on series)
-- Rule-based classifier is keyword-weighted; consider fine-tuning on labelled internal events for higher precision
-
-**Recommended Schedule (via cron or task scheduler)**
-```cron
-# Fetch and process news every 2 hours during market hours
-0 8,10,12,14,16,18 * * 1-5  cd /path/to/risk-dashboard && python ingest.py
-```
-
----
-
-*This platform is intended as a decision-support tool. All risk classifications should be reviewed by qualified risk personnel before informing portfolio or hedging decisions.*
+**Cynthia Wanjiru**
+MS Quantitative Finance — Washington University in St. Louis
+[GitHub: Wanjiru-cynthia](https://github.com/Wanjiru-cynthia)
