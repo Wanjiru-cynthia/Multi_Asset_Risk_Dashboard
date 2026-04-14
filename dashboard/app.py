@@ -30,6 +30,26 @@ def _start_scheduler():
 
 _start_scheduler()
 
+# Force full-width layout for all pages and suppress any auto-discovered nav entry
+st.markdown(
+    """
+    <style>
+    /* Remove default block-container max-width so content runs edge-to-edge */
+    section.main > div.block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        padding-top: 1rem !important;
+    }
+    /* Hide the app entrypoint from the sidebar nav if it ever appears */
+    [data-testid="stSidebarNav"] ul li:first-child a[href="/"] {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 pg = st.navigation([
     st.Page("pages/1_Risk_Events.py",    title="Risk Events",    icon="⚠"),
     st.Page("pages/2_Risk_Trends.py",    title="Risk Trends",    icon="📈"),
