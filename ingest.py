@@ -1,16 +1,6 @@
 """
 Master ingestion pipeline.
 
-Stages:
-  1. Fetch headlines from NewsAPI
-  2. Deduplicate into event clusters
-  3. Score sentiment with FinBERT
-  4. Score severity (quantitative, independent of sentiment)
-  5. Multi-classify: asset classes, risk types with subcategories, region
-  6. Assign narrative label
-  7. Compute composite risk score per cluster
-  8. Persist everything to PostgreSQL
-
 Usage:
     python ingest.py [--days N]
 """
@@ -40,11 +30,9 @@ def run(days_back: int = 3) -> None:
     from nlp.narratives import assign_narrative, upsert_narrative
     from nlp.deduplication import find_or_create_cluster
 
-    # 1. Init schema
     logger.info("Initialising database …")
     initialize_db()
 
-    # 2. Fetch news
     logger.info("Fetching headlines (last %d days) …", days_back)
     articles = fetch_headlines(days_back=days_back)
     logger.info("Fetched %d unique articles.", len(articles))
@@ -53,9 +41,9 @@ def run(days_back: int = 3) -> None:
         logger.info("No articles fetched — check NEWS_API_KEY.")
         return
 
-    # 3. Insert events + deduplicate into clusters
     new_event_ids: list[int] = []
     conn = get_connection()
+    conn.execute("BEGIN")
     try:
         for art in articles:
             title = (art.get("title") or "").strip()
@@ -68,33 +56,26 @@ def run(days_back: int = 3) -> None:
 
             cluster_id = find_or_create_cluster(conn, title, source, published_at)
 
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO news_events (title, description, source, url, published_at, cluster_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (url) DO NOTHING
-                RETURNING id
-                """,
+            cur = conn.execute(
+                "INSERT OR IGNORE INTO news_events "
+                "(title, description, source, url, published_at, cluster_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (title, description, source, url, published_at, cluster_id),
             )
-            row = cur.fetchone()
-            if row:
-                new_event_ids.append(row[0])
+            if cur.rowcount:
+                new_event_ids.append(cur.lastrowid)
 
-        conn.commit()
+        conn.execute("COMMIT")
     except Exception:
-        conn.rollback()
+        conn.execute("ROLLBACK")
         raise
     finally:
         conn.close()
 
     logger.info("New events inserted: %d", len(new_event_ids))
 
-    # 4. Find all unscored events
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
+    unscored = conn.execute(
         """
         SELECT e.id, e.title, e.description, e.cluster_id, e.published_at, e.source
         FROM news_events e
@@ -102,8 +83,7 @@ def run(days_back: int = 3) -> None:
         ORDER BY e.published_at DESC
         LIMIT 500
         """
-    )
-    unscored = cur.fetchall()
+    ).fetchall()
     conn.close()
 
     if not unscored:
@@ -111,14 +91,11 @@ def run(days_back: int = 3) -> None:
         return
 
     logger.info("Scoring %d events through NLP pipeline …", len(unscored))
-
     texts = [f"{r['title']} {r['description'] or ''}".strip() for r in unscored]
-
-    # 5. FinBERT batch scoring
     sentiment_results = score_batch(texts)
 
-    # 6. Process each event
     conn = get_connection()
+    conn.execute("BEGIN")
     try:
         cluster_aggregates: dict[int, list[dict]] = {}
 
@@ -127,71 +104,44 @@ def run(days_back: int = 3) -> None:
             cluster_id = row["cluster_id"]
             pub_at     = row["published_at"] or "2000-01-01T00:00:00Z"
 
-            cur = conn.cursor()
-
-            # Sentiment
-            cur.execute(
-                """
-                INSERT INTO sentiment_scores (event_id, positive, negative, neutral, label, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                ON CONFLICT (event_id) DO UPDATE SET
-                    positive   = EXCLUDED.positive,
-                    negative   = EXCLUDED.negative,
-                    neutral    = EXCLUDED.neutral,
-                    label      = EXCLUDED.label,
-                    confidence = EXCLUDED.confidence
-                """,
+            conn.execute(
+                "INSERT OR REPLACE INTO sentiment_scores "
+                "(event_id, positive, negative, neutral, label, confidence) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (event_id, sent.positive, sent.negative, sent.neutral,
                  sent.label, sent.confidence),
             )
 
-            # Severity
             sev = score_severity(text)
-            cur.execute(
-                """
-                INSERT INTO severity_scores
-                    (event_id, severity_index, severity_level, keyword_score,
-                     entity_count, dollar_impact, reach_score, direction)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (event_id) DO UPDATE SET
-                    severity_index = EXCLUDED.severity_index,
-                    severity_level = EXCLUDED.severity_level,
-                    keyword_score  = EXCLUDED.keyword_score,
-                    entity_count   = EXCLUDED.entity_count,
-                    dollar_impact  = EXCLUDED.dollar_impact,
-                    reach_score    = EXCLUDED.reach_score,
-                    direction      = EXCLUDED.direction
-                """,
+            conn.execute(
+                "INSERT OR REPLACE INTO severity_scores "
+                "(event_id, severity_index, severity_level, keyword_score, "
+                " entity_count, dollar_impact, reach_score, direction) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (event_id, sev.severity_index, sev.severity_level,
                  sev.keyword_score, sev.entity_count, sev.dollar_impact,
                  sev.reach_score, sev.direction),
             )
 
-            # Multi-classification
             mc = classify_multi(row["title"], row["description"] or "")
+            conn.execute("UPDATE news_events SET region = ? WHERE id = ?",
+                         (mc["region"], event_id))
 
-            cur.execute(
-                "UPDATE news_events SET region = %s WHERE id = %s",
-                (mc["region"], event_id),
-            )
-
-            cur.execute("DELETE FROM event_asset_classes WHERE event_id = %s", (event_id,))
+            conn.execute("DELETE FROM event_asset_classes WHERE event_id = ?", (event_id,))
             for ac in mc["asset_classes"]:
-                cur.execute(
+                conn.execute(
                     "INSERT INTO event_asset_classes (event_id, cluster_id, asset_class) "
-                    "VALUES (%s, %s, %s)",
-                    (event_id, cluster_id, ac),
+                    "VALUES (?, ?, ?)", (event_id, cluster_id, ac),
                 )
 
-            cur.execute("DELETE FROM event_risk_types WHERE event_id = %s", (event_id,))
+            conn.execute("DELETE FROM event_risk_types WHERE event_id = ?", (event_id,))
             for rt in mc["risk_types"]:
-                cur.execute(
+                conn.execute(
                     "INSERT INTO event_risk_types "
-                    "(event_id, cluster_id, risk_type, risk_subtype) VALUES (%s, %s, %s, %s)",
+                    "(event_id, cluster_id, risk_type, risk_subtype) VALUES (?, ?, ?, ?)",
                     (event_id, cluster_id, rt["risk_type"], rt.get("risk_subtype")),
                 )
 
-            # Narrative
             narrative = assign_narrative(row["title"], row["description"] or "")
             upsert_narrative(conn, narrative, sent.negative, sev.severity_index)
 
@@ -205,15 +155,11 @@ def run(days_back: int = 3) -> None:
                     "narrative":      narrative,
                 })
 
-        # 7. Update cluster-level composite scores
-        from nlp.composite_score import compute_composite
         for cluster_id, items in cluster_aggregates.items():
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = %s",
+            source_count = conn.execute(
+                "SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = ?",
                 (cluster_id,),
-            )
-            source_count = cur.fetchone()[0]
+            ).fetchone()[0]
 
             avg_neg  = sum(i["neg_sentiment"]  for i in items) / len(items)
             avg_sev  = sum(i["severity_index"] for i in items) / len(items)
@@ -221,22 +167,22 @@ def run(days_back: int = 3) -> None:
             narrative = items[-1]["narrative"]
             composite = compute_composite(avg_sev, avg_neg, latest, source_count)
 
-            cur.execute(
+            conn.execute(
                 """
                 UPDATE event_clusters
-                SET avg_sentiment   = %s,
-                    avg_severity    = %s,
-                    composite_score = %s,
-                    narrative_label = %s,
-                    source_count    = %s
-                WHERE id = %s
+                SET avg_sentiment   = ?,
+                    avg_severity    = ?,
+                    composite_score = ?,
+                    narrative_label = ?,
+                    source_count    = ?
+                WHERE id = ?
                 """,
                 (avg_neg, avg_sev, composite, narrative, source_count, cluster_id),
             )
 
-        conn.commit()
+        conn.execute("COMMIT")
     except Exception:
-        conn.rollback()
+        conn.execute("ROLLBACK")
         raise
     finally:
         conn.close()
