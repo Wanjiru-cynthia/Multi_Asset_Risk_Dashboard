@@ -51,6 +51,11 @@ def _load_macro() -> dict:
 
 def render_macro_sidebar() -> None:
     """Call this from any page to render the macro panel in st.sidebar."""
+    # Hide the app.py entrypoint that Streamlit auto-discovery adds as the first nav item
+    st.markdown(
+        "<style>[data-testid='stSidebarNav'] li:first-child{display:none!important}</style>",
+        unsafe_allow_html=True,
+    )
     with st.sidebar:
         st.markdown("---")
         st.markdown("### 📡 Macro Backdrop")
