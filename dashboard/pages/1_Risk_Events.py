@@ -19,7 +19,6 @@ import plotly.graph_objects as go
 from data.database import fetch_risk_events, fetch_cluster_events
 from dashboard.components.macro_sidebar import render_macro_sidebar
 
-st.set_page_config(page_title="Risk Events", layout="wide", page_icon="⚠")
 render_macro_sidebar()
 
 st.markdown('<h1 style="color:#E63946">⚠ Risk Events</h1>', unsafe_allow_html=True)
