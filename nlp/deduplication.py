@@ -1,13 +1,8 @@
 """
 Event deduplication — clusters news articles reporting the same story.
-
-Strategy:
-  1. Normalize title (lowercase, strip punctuation, remove stop words)
-  2. Extract the N most informative tokens as a cluster key
-  3. Within a configurable look-back window, articles sharing a cluster key
-     are merged into the same event_cluster row.
 """
 
+import json
 import re
 import hashlib
 from datetime import datetime, timedelta
@@ -22,14 +17,11 @@ STOP_WORDS = {
     'also','than','more','than','into','about','up','down','out',
 }
 
-# Default cluster window: articles within 48 h with same key → same cluster
 CLUSTER_WINDOW_HOURS: int = 48
-# Number of tokens used to build the cluster key
 KEY_TOKEN_COUNT: int = 5
 
 
 def normalize_title(title: str) -> list[str]:
-    """Return sorted list of meaningful tokens from title."""
     s = title.lower()
     s = re.sub(r"[^\w\s]", " ", s)
     tokens = [t for t in s.split() if t not in STOP_WORDS and len(t) > 2]
@@ -37,7 +29,6 @@ def normalize_title(title: str) -> list[str]:
 
 
 def cluster_key(title: str) -> str:
-    """Short hash that identifies a story — order-independent."""
     tokens = normalize_title(title)
     top = sorted(tokens)[:KEY_TOKEN_COUNT]
     payload = " ".join(top)
@@ -60,55 +51,50 @@ def find_or_create_cluster(
     published_at: str,
     window_hours: int = CLUSTER_WINDOW_HOURS,
 ) -> int:
-    """
-    Return an existing cluster_id if a matching cluster exists within the
-    look-back window, otherwise create a new cluster row and return its id.
-    """
     key = cluster_key(title)
     cutoff = (
         datetime.fromisoformat(published_at.replace("Z", ""))
         - timedelta(hours=window_hours)
     ).isoformat()
 
-    existing = conn.execute(
+    cur = conn.cursor()
+    cur.execute(
         """
         SELECT id, canonical_title, sources_json
         FROM event_clusters
-        WHERE cluster_key = ?
-          AND last_seen >= ?
+        WHERE cluster_key = %s
+          AND last_seen >= %s
         ORDER BY last_seen DESC
         LIMIT 1
         """,
         (key, cutoff),
-    ).fetchone()
-
-    import json
+    )
+    existing = cur.fetchone()
 
     if existing:
         cluster_id = existing["id"]
         sources = json.loads(existing["sources_json"] or "[]")
         if source not in sources:
             sources.append(source)
-        conn.execute(
+        cur.execute(
             """
             UPDATE event_clusters
-            SET last_seen     = MAX(last_seen, ?),
-                source_count  = (SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = ?),
-                sources_json  = ?
-            WHERE id = ?
+            SET last_seen    = GREATEST(last_seen, %s),
+                source_count = (SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = %s),
+                sources_json = %s
+            WHERE id = %s
             """,
             (published_at, cluster_id, json.dumps(sources), cluster_id),
         )
         return cluster_id
 
-    # No match — create new cluster
-    cur = conn.execute(
+    cur.execute(
         """
         INSERT INTO event_clusters
-            (canonical_title, cluster_key, first_seen, last_seen,
-             source_count, sources_json)
-        VALUES (?, ?, ?, ?, 1, ?)
+            (canonical_title, cluster_key, first_seen, last_seen, source_count, sources_json)
+        VALUES (%s, %s, %s, %s, 1, %s)
+        RETURNING id
         """,
         (title, key, published_at, published_at, json.dumps([source])),
     )
-    return cur.lastrowid
+    return cur.fetchone()[0]
