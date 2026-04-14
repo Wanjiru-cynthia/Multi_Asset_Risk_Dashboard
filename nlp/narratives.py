@@ -3,6 +3,7 @@ Narrative / recurring-theme labeler.
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone
 
 NARRATIVE_PATTERNS: dict[str, list[str]] = {
     "Fed Policy Pivot": [
@@ -86,31 +87,25 @@ def assign_narrative(title: str, description: str = "") -> str:
 
 
 def upsert_narrative(conn, label: str, sentiment_neg: float, severity_index: float) -> None:
-    existing = conn.execute(
-        "SELECT id, event_count, avg_severity, avg_sentiment FROM narratives WHERE label = ?",
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, event_count, avg_severity, avg_sentiment FROM narratives WHERE label = %s",
         (label,),
-    ).fetchone()
+    )
+    existing = cur.fetchone()
 
     if existing:
         n = existing["event_count"] + 1
         new_sev  = ((existing["avg_severity"]  * existing["event_count"]) + severity_index) / n
         new_sent = ((existing["avg_sentiment"] * existing["event_count"]) + sentiment_neg)  / n
-        conn.execute(
-            """
-            UPDATE narratives
-            SET event_count   = ?,
-                avg_severity  = ?,
-                avg_sentiment = ?,
-                last_seen     = datetime('now')
-            WHERE id = ?
-            """,
-            (n, round(new_sev, 4), round(new_sent, 4), existing["id"]),
+        cur.execute(
+            "UPDATE narratives SET event_count=%s, avg_severity=%s, avg_sentiment=%s, last_seen=%s WHERE id=%s",
+            (n, round(new_sev, 4), round(new_sent, 4), now, existing["id"]),
         )
     else:
-        conn.execute(
-            """
-            INSERT INTO narratives (label, first_seen, last_seen, event_count, avg_severity, avg_sentiment)
-            VALUES (?, datetime('now'), datetime('now'), 1, ?, ?)
-            """,
-            (label, round(severity_index, 4), round(sentiment_neg, 4)),
+        cur.execute(
+            "INSERT INTO narratives (label, first_seen, last_seen, event_count, avg_severity, avg_sentiment) "
+            "VALUES (%s, %s, %s, 1, %s, %s)",
+            (label, now, now, round(severity_index, 4), round(sentiment_neg, 4)),
         )
