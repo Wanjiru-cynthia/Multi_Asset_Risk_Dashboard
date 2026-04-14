@@ -2,9 +2,9 @@
 Event deduplication — clusters news articles reporting the same story.
 """
 
-import json
 import re
 import hashlib
+import json
 from datetime import datetime, timedelta
 
 STOP_WORDS = {
@@ -35,15 +35,6 @@ def cluster_key(title: str) -> str:
     return hashlib.sha1(payload.encode()).hexdigest()[:12]
 
 
-def jaccard(a: set[str], b: set[str]) -> float:
-    if not a and not b:
-        return 1.0
-    union = a | b
-    if not union:
-        return 0.0
-    return len(a & b) / len(union)
-
-
 def find_or_create_cluster(
     conn,
     title: str,
@@ -57,44 +48,41 @@ def find_or_create_cluster(
         - timedelta(hours=window_hours)
     ).isoformat()
 
-    cur = conn.cursor()
-    cur.execute(
+    existing = conn.execute(
         """
         SELECT id, canonical_title, sources_json
         FROM event_clusters
-        WHERE cluster_key = %s
-          AND last_seen >= %s
+        WHERE cluster_key = ?
+          AND last_seen >= ?
         ORDER BY last_seen DESC
         LIMIT 1
         """,
         (key, cutoff),
-    )
-    existing = cur.fetchone()
+    ).fetchone()
 
     if existing:
         cluster_id = existing["id"]
         sources = json.loads(existing["sources_json"] or "[]")
         if source not in sources:
             sources.append(source)
-        cur.execute(
+        conn.execute(
             """
             UPDATE event_clusters
-            SET last_seen    = GREATEST(last_seen, %s),
-                source_count = (SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = %s),
-                sources_json = %s
-            WHERE id = %s
+            SET last_seen    = MAX(last_seen, ?),
+                source_count = (SELECT COUNT(DISTINCT source) FROM news_events WHERE cluster_id = ?),
+                sources_json = ?
+            WHERE id = ?
             """,
             (published_at, cluster_id, json.dumps(sources), cluster_id),
         )
         return cluster_id
 
-    cur.execute(
+    cur = conn.execute(
         """
         INSERT INTO event_clusters
             (canonical_title, cluster_key, first_seen, last_seen, source_count, sources_json)
-        VALUES (%s, %s, %s, %s, 1, %s)
-        RETURNING id
+        VALUES (?, ?, ?, ?, 1, ?)
         """,
         (title, key, published_at, published_at, json.dumps([source])),
     )
-    return cur.fetchone()[0]
+    return cur.lastrowid
