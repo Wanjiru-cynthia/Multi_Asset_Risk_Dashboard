@@ -131,5 +131,5 @@ The APScheduler library runs a background scheduler inside the Streamlit process
 ## Author
 
 **Cynthia Wanjiru**
-MS Quantitative Finance — Washington University in St. Louis
-[GitHub: Wanjiru-cynthia](https://github.com/Wanjiru-cynthia)
+MS Quantitative Finance Washington University in St. Louis
+
