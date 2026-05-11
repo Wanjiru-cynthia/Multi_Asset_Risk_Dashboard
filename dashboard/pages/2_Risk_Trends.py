@@ -1,6 +1,6 @@
 """
 Page 2 — Risk Trends
-  • Composite risk score over time by risk type
+  • Severity trend heatmap by asset class and risk type
   • Sentiment trend lines by asset class
   • Risk heatmap (asset class × risk type)
   • Narrative tracker: recurring themes with counts, severity, sentiment
@@ -18,8 +18,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from data.database import (
-    fetch_heatmap_data, fetch_sentiment_trend,
-    fetch_composite_trend, fetch_narrative_stats,
+    fetch_heatmap_data, fetch_sentiment_trend, fetch_narrative_stats,
 )
 from dashboard.components.macro_sidebar import render_macro_sidebar
 
@@ -55,49 +54,12 @@ def load_all(days):
     return (
         fetch_heatmap_data(days=days),
         fetch_sentiment_trend(days=days),
-        fetch_composite_trend(days=days),
         fetch_narrative_stats(days=days),
     )
 
-heatmap_df, sentiment_df, composite_df, narrative_df = load_all(lookback)
+heatmap_df, sentiment_df, narrative_df = load_all(lookback)
 
-# ── Section 1: Composite risk trend ──────────────────────────────────────────
-st.markdown("### Composite Risk Score — by Risk Type")
-
-if composite_df.empty:
-    st.info("No composite trend data yet.")
-else:
-    fig = go.Figure()
-    for rt in RISK_TYPES:
-        sub = composite_df[composite_df["risk_type"] == rt].copy()
-        if sub.empty:
-            continue
-        sub["date"] = pd.to_datetime(sub["date"])
-        fig.add_trace(go.Scatter(
-            x=sub["date"], y=sub["avg_composite"],
-            name=rt.title(),
-            mode="lines+markers",
-            line=dict(color=RISK_COLORS.get(rt,"#888"), width=2),
-            marker=dict(size=5),
-            hovertemplate=(
-                f"<b>{rt.title()}</b><br>"
-                "%{x|%b %d}<br>"
-                "Composite: %{y:.1f}<extra></extra>"
-            ),
-        ))
-    fig.update_layout(
-        yaxis_title="Composite Score (0–100)",
-        plot_bgcolor="#0D1117", paper_bgcolor="#0D1117",
-        font=dict(color="#C9D1D9", size=12),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        height=320, margin=dict(t=40,b=40,l=60,r=20),
-        hovermode="x unified",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-st.markdown("---")
-
-# ── Section 2: Heatmap + Sentiment side by side ───────────────────────────────
+# ── Section 1: Heatmap + Sentiment side by side ───────────────────────────────
 col_heat, col_sent = st.columns(2)
 
 with col_heat:

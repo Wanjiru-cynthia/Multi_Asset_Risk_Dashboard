@@ -1,6 +1,6 @@
 """
 Page 1 — Risk Events
-  • Filterable event list ranked by composite risk score
+  • Filterable event list ranked by severity index
   • Source attribution: all outlets, first/latest date
   • Click any event → inline detail drawer with FinBERT scores,
     severity breakdown, probability distribution, article links
@@ -68,7 +68,7 @@ with st.expander("🔍 Filters", expanded=True):
 
 col_sort, col_refresh = st.columns([3,1])
 with col_sort:
-    sort_by = st.radio("Sort by", ["Composite Score","Severity","Latest Date"],
+    sort_by = st.radio("Sort by", ["Severity Index","Latest Date"],
                        horizontal=True)
 with col_refresh:
     if st.button("🔄 Refresh"):
@@ -98,17 +98,16 @@ if narrative_filter and not events.empty:
 
 # Sort
 if not events.empty:
-    if sort_by == "Severity":
-        events = events.sort_values("avg_severity", ascending=False)
-    elif sort_by == "Latest Date":
+    if sort_by == "Latest Date":
         events = events.sort_values("last_seen", ascending=False)
-    # default: composite_score (already sorted by DB)
+    else:
+        events = events.sort_values("avg_severity", ascending=False)
 
 # ── KPI strip ─────────────────────────────────────────────────────────────────
 k1,k2,k3,k4 = st.columns(4)
 k1.metric("Events (deduplicated)", len(events))
-k2.metric("Avg Composite Score",
-          f"{events['composite_score'].mean():.1f}" if not events.empty else "—")
+k2.metric("Avg Severity Index",
+          f"{events['avg_severity'].mean():.1f}" if not events.empty else "—")
 k3.metric("Critical / High",
           int((events["avg_severity"] >= 60).sum()) if not events.empty else 0)
 k4.metric("Negative Direction",
@@ -132,7 +131,6 @@ for _, ev in events.iterrows():
     sev_idx     = float(ev.get("avg_severity") or 0)
     sev_level   = max(1, min(5, int(sev_idx / 20) + 1))
     border_col  = SEV_COLOR.get(sev_level, "#444")
-    comp_score  = float(ev.get("composite_score") or 0)
     direction   = str(ev.get("direction") or "neutral")
     sources     = ev.get("sources_list") or json.loads(ev.get("sources_json") or "[]")
     src_str     = " · ".join(sources[:4]) + (" …" if len(sources) > 4 else "")
@@ -168,11 +166,8 @@ for _, ev in events.iterrows():
                 &nbsp;|&nbsp; <b>Assets:</b> {asset_cls or "—"}
               </div>
               <div style="display:flex;align-items:center;gap:12px">
-                <div style="flex:1">{score_bar(comp_score)}</div>
-                <span style="font-size:0.7rem;color:#888">Composite</span>
-                <span style="font-size:0.7rem;color:#aaa">
-                  Sev index: {sev_idx:.0f}/100
-                </span>
+                <div style="flex:1">{score_bar(sev_idx)}</div>
+                <span style="font-size:0.7rem;color:#888">Severity Index</span>
               </div>
             </div>
             """,
@@ -203,7 +198,7 @@ for _, ev in events.iterrows():
             d1.metric("Sources", len(sources))
             d2.metric("First Reported", first_seen)
             d3.metric("Latest Update", last_seen)
-            d4.metric("Composite Score", f"{comp_score:.1f}/100")
+            d4.metric("Severity Index", f"{sev_idx:.0f}/100")
 
             st.markdown("**Description:**")
             st.markdown(ev.get("description") or "_No description available._")

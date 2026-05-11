@@ -26,7 +26,6 @@ def run(days_back: int = 3) -> None:
     from nlp.finbert_pipeline import score_batch
     from nlp.classifier import classify_multi
     from nlp.severity import score_severity
-    from nlp.composite_score import compute_composite
     from nlp.narratives import assign_narrative, upsert_narrative
     from nlp.deduplication import find_or_create_cluster
 
@@ -177,16 +176,14 @@ def run(days_back: int = 3) -> None:
             avg_sev   = sum(i["severity_index"] for i in items) / len(items)
             latest    = max(items, key=lambda x: x["published_at"])["published_at"]
             narrative = items[-1]["narrative"]
-            composite = compute_composite(avg_sev, avg_neg, latest, source_count)
-
             cur.execute(
                 """
                 UPDATE event_clusters
-                SET avg_sentiment=%s, avg_severity=%s, composite_score=%s,
+                SET avg_sentiment=%s, avg_severity=%s,
                     narrative_label=%s, source_count=%s
                 WHERE id=%s
                 """,
-                (avg_neg, avg_sev, composite, narrative, source_count, cluster_id),
+                (avg_neg, avg_sev, narrative, source_count, cluster_id),
             )
 
         conn.commit()

@@ -82,8 +82,33 @@ def find_or_create_cluster(
         INSERT INTO event_clusters
             (canonical_title, cluster_key, first_seen, last_seen, source_count, sources_json)
         VALUES (%s, %s, %s, %s, 1, %s)
+        ON CONFLICT (cluster_key) DO NOTHING
         RETURNING id
         """,
         (title, key, published_at, published_at, json.dumps([source])),
     )
-    return cur.fetchone()[0]
+    row = cur.fetchone()
+    if row:
+        return row[0]
+
+    # Conflict: another row with this cluster_key already exists (possibly outside the
+    # time window we queried above). Fetch it and update last_seen / sources.
+    cur.execute(
+        "SELECT id, sources_json FROM event_clusters WHERE cluster_key = %s",
+        (key,),
+    )
+    existing = cur.fetchone()
+    cluster_id = existing["id"]
+    sources = json.loads(existing["sources_json"] or "[]")
+    if source not in sources:
+        sources.append(source)
+    cur.execute(
+        """
+        UPDATE event_clusters
+        SET last_seen    = GREATEST(last_seen, %s),
+            sources_json = %s
+        WHERE id = %s
+        """,
+        (published_at, json.dumps(sources), cluster_id),
+    )
+    return cluster_id

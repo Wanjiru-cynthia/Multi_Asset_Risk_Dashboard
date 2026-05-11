@@ -53,7 +53,6 @@ _DDL = [
         sources_json    TEXT    DEFAULT '[]',
         avg_sentiment   REAL    DEFAULT 0,
         avg_severity    REAL    DEFAULT 0,
-        composite_score REAL    DEFAULT 0,
         narrative_label TEXT,
         created_at      TEXT    DEFAULT (NOW()::TEXT)
     )
@@ -139,6 +138,7 @@ _DDL = [
     "CREATE INDEX IF NOT EXISTS idx_events_cluster    ON news_events(cluster_id)",
     "CREATE INDEX IF NOT EXISTS idx_events_published  ON news_events(published_at)",
     "CREATE INDEX IF NOT EXISTS idx_events_region     ON news_events(region)",
+    "ALTER TABLE event_clusters DROP COLUMN IF EXISTS composite_score",
 ]
 
 
@@ -264,7 +264,7 @@ def insert_risk_types(event_id: int, cluster_id: int | None, risk_types: list[di
 
 
 def update_cluster_scores(cluster_id: int, avg_sentiment: float,
-                           avg_severity: float, composite_score: float,
+                           avg_severity: float,
                            narrative_label: str) -> None:
     conn = get_connection()
     cur = conn.cursor()
@@ -272,10 +272,10 @@ def update_cluster_scores(cluster_id: int, avg_sentiment: float,
         cur.execute(
             """
             UPDATE event_clusters
-            SET avg_sentiment=%s, avg_severity=%s, composite_score=%s, narrative_label=%s
+            SET avg_sentiment=%s, avg_severity=%s, narrative_label=%s
             WHERE id=%s
             """,
-            (avg_sentiment, avg_severity, composite_score, narrative_label, cluster_id),
+            (avg_sentiment, avg_severity, narrative_label, cluster_id),
         )
         conn.commit()
     finally:
@@ -332,7 +332,7 @@ def fetch_risk_events(
                 c.id              AS cluster_id,
                 c.canonical_title AS title,
                 c.first_seen, c.last_seen, c.source_count, c.sources_json,
-                c.avg_sentiment, c.avg_severity, c.composite_score, c.narrative_label,
+                c.avg_sentiment, c.avg_severity, c.narrative_label,
                 (SELECT e2.url FROM news_events e2
                  WHERE e2.cluster_id = c.id ORDER BY e2.published_at DESC LIMIT 1) AS url,
                 (SELECT ARRAY_TO_STRING(ARRAY_AGG(DISTINCT ac.asset_class), ',')
@@ -351,7 +351,7 @@ def fetch_risk_events(
                  WHERE e4.cluster_id = c.id ORDER BY e4.published_at DESC LIMIT 1) AS description
             FROM event_clusters c
             WHERE {where_sql}
-            ORDER BY c.composite_score DESC, c.last_seen DESC
+            ORDER BY c.avg_severity DESC, c.last_seen DESC
             LIMIT %s
             """,
             params + [limit],
@@ -407,24 +407,6 @@ def fetch_sentiment_trend(days: int = 14) -> pd.DataFrame:
     except Exception:
         return pd.DataFrame()
 
-
-def fetch_composite_trend(days: int = 14) -> pd.DataFrame:
-    try:
-        return _query_df(
-            """
-            SELECT LEFT(c.last_seen, 10) AS date, rt.risk_type,
-                   AVG(c.composite_score) AS avg_composite,
-                   COUNT(DISTINCT c.id)   AS event_count
-            FROM event_clusters    c
-            JOIN event_risk_types rt ON rt.cluster_id = c.id
-            WHERE c.last_seen >= %s
-            GROUP BY LEFT(c.last_seen, 10), rt.risk_type
-            ORDER BY date ASC
-            """,
-            [_cutoff(days)],
-        )
-    except Exception:
-        return pd.DataFrame()
 
 
 def fetch_narrative_stats(days: int = 30) -> pd.DataFrame:
