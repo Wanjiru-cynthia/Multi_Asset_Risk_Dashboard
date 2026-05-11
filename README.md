@@ -10,7 +10,7 @@ A live risk monitoring dashboard that reads financial news, scores sentiment wit
 
 Most risk teams find out about a market moving event from a colleague, a news alert, or an end of day report. By then the price has already moved. This dashboard is my attempt to close that gap.
 
-Every time the app runs, it pulls the latest financial headlines, runs them through a sentiment model trained specifically on financial text, tags each story by asset class and risk type, groups duplicate stories from different outlets into a single event, and puts a composite risk score on it. The result is a live feed of ranked risk events that updates continuously, with six Federal Reserve indicators always visible in the sidebar so you never lose sight of the macro backdrop.
+Every time the app runs, it pulls the latest financial headlines, runs them through a sentiment model trained specifically on financial text, tags each story by asset class and risk type, and groups duplicate stories from different outlets into a single event. The result is a live feed of ranked risk events that updates continuously, with six Federal Reserve indicators always visible in the sidebar so you never lose sight of the macro backdrop.
 
 I built this to be something a portfolio manager or risk analyst can actually open in the morning and use — not a proof of concept, but a working tool.
 
@@ -20,13 +20,13 @@ I built this to be something a portfolio manager or risk analyst can actually op
 
 ### Risk Events
 
-This is the main feed. It shows every classified news event from the past several days (3,7,14,30), ranked by composite risk score. You can filter by asset class (equities, fixed income, FX, commodities), risk type (market, credit, geopolitical, operational, liquidity), severity band, region, and time window.
+This is the main feed. It shows every classified news event from the past several days (3,7,14,30), ranked by severity index. You can filter by asset class (equities, fixed income, FX, commodities), risk type (market, credit, geopolitical, operational, liquidity), severity band, region, and time window.
 
-Each entry shows the FinBERT sentiment label, severity band, narrative theme, number of sources covering the same story, and a link to the original article. Stories reported by multiple outlets appear as a single clustered event with a higher composite score, so a banking stress story covered by Reuters, Bloomberg, and the FT will surface higher than a one source item with the same text.
+Each entry shows the FinBERT sentiment label, severity band, narrative theme, number of sources covering the same story, and a link to the original article. Stories reported by multiple outlets appear as a single clustered event, so a banking stress story covered by Reuters, Bloomberg, and the FT will surface higher than a one source item with the same text.
 
 ### Risk Trends
 
-Time series charts showing how the risk signal has evolved over the lookback window. This includes composite score over time, event volume by narrative theme, daily sentiment distribution, and severity distribution by day. It is useful for spotting whether a spike in risk events is a single day anomaly or a building regime shift.
+Time series charts showing how the risk signal has evolved over the lookback window. This includes event volume by narrative theme, daily sentiment distribution, and severity distribution by day. It is useful for spotting whether a spike in risk events is a single day anomaly or a building regime shift.
 
 ### Market Summary
 
@@ -48,7 +48,7 @@ Headlines are fetched from NewsAPI across eight thematic queries — "financial 
 
 Before any scoring happens, each article title is normalized (lowercased, punctuation stripped, stop words removed) and the top five remaining tokens are sorted and hashed with SHA1 to produce a cluster key. Any article with the same cluster key published within 48 hours of an existing cluster gets merged into that cluster rather than inserted as a new event. This prevents the same story from appearing twenty times because twenty outlets ran it.
 
-The source count on each cluster is the number of distinct outlets that covered that story. It is one of the four inputs to the composite score.
+The source count on each cluster is the number of distinct outlets that covered that story.
 
 ### Sentiment Analysis
 
@@ -66,24 +66,6 @@ Sentiment alone does not tell you how bad something is. A story that says "the b
 | Reach score | 15% | Proxy for systemic scope — global events score higher than regional ones |
 
 The result is a 0 to 100 index mapped to four bands: LOW, MODERATE, HIGH, CRITICAL.
-
-### Composite Score
-
-Each event cluster gets a single composite risk score that combines all the signals:
-
-```
-composite = (0.40 × avg_severity_index)
-          + (0.30 × avg_negative_sentiment × 100)
-          + (0.20 × recency_decay × 100)
-          + (0.10 × min(source_count / 10, 1.0) × 100)
-```
-
-Recency decay is exponential over 72 hours so older stories fade out as new ones come in:
-
-```python
-hours_old = (now - last_seen_utc).total_seconds() / 3600
-recency_decay = exp(-hours_old / 72)
-```
 
 ### Classification
 
