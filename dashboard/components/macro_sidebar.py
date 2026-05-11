@@ -20,9 +20,6 @@ def _start_scheduler():
     from scheduler import start_scheduler
     return start_scheduler(interval_hours=6)
 
-_start_scheduler()
-
-
 
 def _indicator_color(series_id: str, value: float | None) -> str:
     """Return a hex colour for the metric delta based on risk signal."""
@@ -52,6 +49,7 @@ def _load_macro() -> dict:
 
 def render_macro_sidebar() -> None:
     """Call this from any page to render the macro panel in st.sidebar."""
+    _start_scheduler()
     st.markdown(
         "<style>[data-testid='stSidebarNav'] li:first-child{display:none!important}</style>",
         unsafe_allow_html=True,
