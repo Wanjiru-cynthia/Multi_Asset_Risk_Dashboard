@@ -2,7 +2,7 @@
 
 A live risk monitoring dashboard that reads financial news, scores sentiment with a finance trained language model, classifies events by asset class and risk type, and shows everything in one place alongside real time market and macroeconomic data.
 
-**[Live App]((http://localhost:8501/Risk_Events)**
+**(http://localhost:8501/Risk_Events)**
 
 ---
 
